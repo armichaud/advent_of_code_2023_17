@@ -1,78 +1,11 @@
-use nalgebra::DMatrix;
-use std::cmp::min;
-use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufReader, BufRead};
+use nalgebra::DMatrix;
+use petgraph::Directed;
+use petgraph::graph::Graph;
+use petgraph::algo::dijkstra;
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,    
-}
-
-impl Direction {
-    fn get_perpendicular_directions(&self) -> Vec<Direction> {
-        match self {
-            Direction::Up => vec![Direction::Left, Direction::Right],
-            Direction::Down => vec![Direction::Left, Direction::Right],
-            _ => vec![Direction::Up, Direction::Down],
-        }
-    }
-
-    fn possible_destinations(self: &Self, location: &Location, nrows: usize, ncols: usize) -> Vec<Location> {
-        let (row, col) = location;
-        let mut output: Vec<Location> = Vec::new();
-        match self {
-            Direction::Up => {
-                for i in (*row as i32 - 3)..*row as i32 {
-                    let destination = (i as usize, *col);
-                    if i > -1 {
-                        output.push(destination);
-                    }
-                }
-            },
-            Direction::Down => {
-                for i in *row + 1..(*row + 4) {
-                    let destination = (i as usize, *col);
-                    if i < nrows {
-                        output.push(destination);
-                    }
-                }
-            },
-            Direction::Left => {
-                for i in (*col as i32 - 3)..*col as i32 {
-                    let destination = (*row, i as usize);
-                    if i > -1 {
-                        output.push(destination);
-                    }
-                }
-            },
-            Direction::Right => {
-                for i in *col + 1..(*col + 4) {
-                    let destination = (*row, i as usize);
-                    if i < ncols {
-                        output.push(destination);
-                    }
-                }
-            },
-        }
-        //println!("{:?} {:?} {:?}", self, location, output);
-        output
-    }
-}
-
-type Location = (usize, usize);
-
-#[derive(Debug, Clone)]
-struct Memo {
-    location: Location,
-    previous_direction: Direction,
-    heat_loss: usize,
-    visited: HashSet<Location>
-}
+type Coord = (usize, usize);
 
 fn build_matrix(filename: &str) -> DMatrix<usize> {
     let file = File::open(filename).unwrap();
@@ -91,61 +24,70 @@ fn build_matrix(filename: &str) -> DMatrix<usize> {
     DMatrix::from_row_slice(nrows, data.len() / nrows, &data)
 }
 
-fn brute_force(filename: &str) -> usize {
-    let matrix = build_matrix(filename);
-    let nrows = matrix.nrows();
-    let ncols = matrix.ncols();
-    let mut stack: Vec<Memo> = Vec::from(&[
-        Memo {
-            location: (0, 0),
-            previous_direction: Direction::Right,
-            heat_loss: 0,
-            visited: HashSet::new(),
-        },
-        Memo {
-            location: (0, 0),
-            previous_direction: Direction::Down,
-            heat_loss: 0,
-            visited: HashSet::new(),
-        },
-    ]);
-    let mut min_heat_loss = usize::MAX;
-    while stack.len() > 0 {
-        let mut current = stack.pop().unwrap();
-        
-        let updated_heat_loss = current.heat_loss + matrix[(current.location.0, current.location.1)];
-        // End of path
-        if current.location == (nrows - 1, ncols - 1) {
-            min_heat_loss = min(updated_heat_loss, min_heat_loss);
-            continue;
+
+fn min_heat_loss(file: &str) -> usize {
+    let matrix = build_matrix(file);
+    let mut graph = Graph::<Coord, usize, Directed>::new();
+    for row in 0..matrix.nrows() {
+        for col in 0..matrix.ncols() {
+            graph.add_node((row, col));
         }
-
-        // Skip already visited
-        if current.visited.contains(&(current.location.0, current.location.1)) {
-            continue;
-        }
-        println!("{:?}", current.location);
-
-        // Track visit
-        current.visited.insert((current.location.0, current.location.1));
-
-        let possible_directions = current.previous_direction.get_perpendicular_directions();
-        for direction in possible_directions {
-            let possible_destinations = direction.possible_destinations(&current.location, nrows, ncols);
-            for destination in possible_destinations {
-                stack.push(Memo {
-                    location: (destination.0, destination.1),
-                    previous_direction: direction,
-                    heat_loss: updated_heat_loss,
-                    visited: current.visited.clone(),
-                });
+    }
+    for row in 0..matrix.nrows() {
+        for col in 0..matrix.ncols() {
+            let location = (row, col);
+            let source = graph.node_indices().find(|i| graph[*i] == location).unwrap();
+            let mut neighbors: Vec<(Coord, usize)> = Vec::new();
+            // Up
+            let mut weight = 0;
+            for i in ((row as i32 - 3)..row as i32).rev() {
+                if i > -1 {
+                    let destination = (i as usize, col);
+                    weight += matrix[destination];
+                    neighbors.push((destination, weight));
+                }
+            }
+            // Down
+            let mut weight = 0;
+            for i in row + 1..row + 4 {
+                if i < matrix.nrows() {
+                    let destination = (i, col);
+                    weight += matrix[destination];
+                    neighbors.push((destination, weight));
+                }
+            }
+            // Left
+            let mut weight = 0;
+            for i in ((col as i32 - 3)..col as i32).rev() {
+                if i > -1 {
+                    let destination = (row, i as usize);
+                    weight += matrix[destination];
+                    neighbors.push((destination, weight));
+                }
+            }
+            // Right
+            let mut weight = 0;
+            for i in col + 1..col + 4 {
+                if i < matrix.ncols() {
+                    let destination = (row, i);
+                    weight += matrix[destination];
+                    neighbors.push((destination, weight));
+                }
+            }
+            for neighbor in neighbors {
+                let target = graph.node_indices().find(|i| graph[*i] == neighbor.0).unwrap();
+                println!("{:?} -> {:?} = {}", location, neighbor.0, neighbor.1);
+                graph.add_edge(source, target, neighbor.1);
             }
         }
     }
-    min_heat_loss
+    let start = graph.node_indices().find(|i| graph[*i] == (0,0)).unwrap();
+    let goal = graph.node_indices().find(|i| graph[*i] == (matrix.nrows() - 1, matrix.ncols() - 1)).unwrap();
+    let node_map = dijkstra(&graph, start, Some(goal), |e| *e.weight());
+    *node_map.get(&goal).unwrap()
 }
 
 fn main() {
-    assert_eq!(brute_force("example.txt"), 102);
-    // assert_eq!(brute_force("input.txt"), 0);
+    assert_eq!(min_heat_loss("example.txt"), 102);
+    // assert_eq!(dijkstra("input.txt"), 0);
 }
