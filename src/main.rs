@@ -14,29 +14,12 @@ enum Direction {
 }
 
 impl Direction {
-    fn get_all() -> Vec<Direction> {
-        vec![
-            Direction::Up,
-            Direction::Down,
-            Direction::Left,
-            Direction::Right,
-        ]
-    }
-
-    fn opposite(&self) -> Direction {
+    fn get_perpendicular_directions(&self) -> Vec<Direction> {
         match self {
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
+            Direction::Up => vec![Direction::Left, Direction::Right],
+            Direction::Down => vec![Direction::Left, Direction::Right],
+            _ => vec![Direction::Up, Direction::Down],
         }
-    }
-
-    fn get_all_but(&self) -> Vec<Direction> {
-        Direction::get_all()
-            .into_iter()
-            .filter(|x| x != self)
-            .collect::<Vec<_>>()
     }
 
     fn possible_destinations(self: &Self, location: &Location, nrows: usize, ncols: usize) -> Vec<Location> {
@@ -45,33 +28,38 @@ impl Direction {
         match self {
             Direction::Up => {
                 for i in (*row as i32 - 3)..*row as i32 {
+                    let destination = (i as usize, *col);
                     if i > -1 {
-                        output.push((i as usize, *col));
+                        output.push(destination);
                     }
                 }
             },
             Direction::Down => {
-                for i in *row..(*row + 3) {
+                for i in *row + 1..(*row + 4) {
+                    let destination = (i as usize, *col);
                     if i < nrows {
-                        output.push((i as usize, *col));
+                        output.push(destination);
                     }
                 }
             },
             Direction::Left => {
                 for i in (*col as i32 - 3)..*col as i32 {
+                    let destination = (*row, i as usize);
                     if i > -1 {
-                        output.push((*row, i as usize));
+                        output.push(destination);
                     }
                 }
             },
             Direction::Right => {
-                for i in *col..(*col + 3) {
+                for i in *col + 1..(*col + 4) {
+                    let destination = (*row, i as usize);
                     if i < ncols {
-                        output.push((*row, i as usize));
+                        output.push(destination);
                     }
                 }
             },
         }
+        //println!("{:?} {:?} {:?}", self, location, output);
         output
     }
 }
@@ -113,35 +101,44 @@ fn brute_force(filename: &str) -> usize {
             previous_direction: Direction::Right,
             heat_loss: 0,
             visited: HashSet::new(),
-        }
+        },
+        Memo {
+            location: (0, 0),
+            previous_direction: Direction::Down,
+            heat_loss: 0,
+            visited: HashSet::new(),
+        },
     ]);
     let mut min_heat_loss = usize::MAX;
     while stack.len() > 0 {
-        let current = stack.pop().unwrap();
-        println!("{:?}", current);
+        let mut current = stack.pop().unwrap();
+        
+        let updated_heat_loss = current.heat_loss + matrix[(current.location.0, current.location.1)];
+        // End of path
         if current.location == (nrows - 1, ncols - 1) {
-            min_heat_loss = min(current.heat_loss, min_heat_loss);
+            min_heat_loss = min(updated_heat_loss, min_heat_loss);
             continue;
         }
 
-        let mut visited = current.visited.clone();
-        visited.insert((current.location.0, current.location.1));
-        let possible_directions = current.previous_direction.get_all_but();
+        // Skip already visited
+        if current.visited.contains(&(current.location.0, current.location.1)) {
+            continue;
+        }
+        println!("{:?}", current.location);
+
+        // Track visit
+        current.visited.insert((current.location.0, current.location.1));
+
+        let possible_directions = current.previous_direction.get_perpendicular_directions();
         for direction in possible_directions {
-            for destination in direction
-                    .possible_destinations(&current.location, nrows, ncols)
-                    .iter()
-                    .filter(|x| !current.visited.contains(x))
-                    .collect::<Vec<&Location>>() {
-                let heat_loss = current.heat_loss + matrix[(destination.0, destination.1)];
-                if heat_loss < min_heat_loss {
-                    stack.push(Memo {
-                        location: *destination,
-                        previous_direction: direction.opposite(),
-                        heat_loss,
-                        visited: visited.clone(),
-                    });
-                }
+            let possible_destinations = direction.possible_destinations(&current.location, nrows, ncols);
+            for destination in possible_destinations {
+                stack.push(Memo {
+                    location: (destination.0, destination.1),
+                    previous_direction: direction,
+                    heat_loss: updated_heat_loss,
+                    visited: current.visited.clone(),
+                });
             }
         }
     }
