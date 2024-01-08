@@ -1,11 +1,30 @@
+use std::cmp::{Reverse, min};
+use std::collections::BinaryHeap;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use nalgebra::DMatrix;
 use petgraph::Directed;
+use petgraph::prelude::NodeIndex;
 use petgraph::graph::Graph;
-use petgraph::algo::dijkstra;
 
 type Coord = (usize, usize);
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Axis {
+    X,
+    Y,
+}
+
+impl Axis {
+    fn opposite(&self) -> Axis {
+        match self {
+            Axis::X => Axis::Y,
+            Axis::Y => Axis::X,
+        }
+    }
+
+}
+
 
 fn build_matrix(filename: &str) -> DMatrix<usize> {
     let file = File::open(filename).unwrap();
@@ -24,6 +43,75 @@ fn build_matrix(filename: &str) -> DMatrix<usize> {
     DMatrix::from_row_slice(nrows, data.len() / nrows, &data)
 }
 
+#[derive(Eq, PartialEq)]
+struct WeightedNode {
+    node_id: NodeIndex,
+    weight: usize,
+    axis: Axis,
+}
+
+impl Ord for WeightedNode {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.weight.cmp(&other.weight)
+    }
+}
+
+impl PartialOrd for WeightedNode {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn update_weight(heap: &mut BinaryHeap<Reverse<WeightedNode>>, node_id: NodeIndex, weight: usize, axis: Axis) {
+    let index = heap.iter().position(|&Reverse(ref node)| node.node_id == node_id);
+    if index.is_some() {
+        heap.retain(|x| x.0.node_id.index() != node_id.index());
+        heap.push(Reverse(WeightedNode {
+            node_id,
+            weight,
+            axis,
+        }));
+    } else {
+        println!("Node ID {} not found in the heap.", node_id.index());
+    }
+}
+
+fn dijkstra(graph: &Graph<Coord, usize, Directed>, start: NodeIndex, goal: NodeIndex, axis: Axis) -> usize {
+    let mut priority_queue: BinaryHeap<Reverse<WeightedNode>>  = BinaryHeap::new();
+    for node in graph.node_indices() {
+        priority_queue.push(Reverse(WeightedNode {
+            node_id: node,
+            weight: usize::max_value(),
+            axis,
+        }));
+    }
+    update_weight(&mut priority_queue, start, 0, axis.clone());
+    while let Some(Reverse(node)) = priority_queue.pop() {
+        let axis = node.axis;
+        let node_index: NodeIndex = NodeIndex::new(node.node_id.index() as usize);
+        let coord: Coord = graph[node_index];
+        if node.node_id.index() == goal.index() {
+            return node.weight;
+        }
+        for neighbor in graph.neighbors(NodeIndex::new(node.node_id.index() as usize)) {
+            let (x, y) = graph[neighbor];
+            // We only want to consider neighbors on the axis perpendicular to the previous step.
+            // This is the entire reason we need to have a custom dijkstra implementation.
+            if axis == Axis::X && x != coord.0 {
+                continue;
+            }
+            if axis == Axis::Y && y != coord.1 {
+                continue;
+            };
+            let edge_weight = graph.edges_connecting(NodeIndex::new(node.node_id.index() as usize), neighbor).next().unwrap().weight();
+            let potential_weight = priority_queue.iter().find(|&Reverse(x)| x.node_id == neighbor).unwrap().0.weight + edge_weight;
+            if potential_weight < node.weight {
+                update_weight(&mut priority_queue, neighbor, potential_weight, axis.opposite());
+            }
+        }
+    }
+    usize::max_value()
+}
 
 fn min_heat_loss(file: &str) -> usize {
     let matrix = build_matrix(file);
@@ -83,8 +171,9 @@ fn min_heat_loss(file: &str) -> usize {
     }
     let start = graph.node_indices().find(|i| graph[*i] == (0,0)).unwrap();
     let goal = graph.node_indices().find(|i| graph[*i] == (matrix.nrows() - 1, matrix.ncols() - 1)).unwrap();
-    let node_map = dijkstra(&graph, start, Some(goal), |e| *e.weight());
-    *node_map.get(&goal).unwrap()
+    let shortest_path_starting_horizontal = dijkstra(&graph, start, goal, Axis::X);
+    let shortest_path_starting_vertical = dijkstra(&graph, start, goal, Axis::Y);
+    min(shortest_path_starting_horizontal, shortest_path_starting_vertical)
 }
 
 fn main() {
