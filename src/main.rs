@@ -77,7 +77,8 @@ fn update_weight(heap: &mut BinaryHeap<Reverse<WeightedNode>>, node_id: NodeInde
 }
 
 fn dijkstra(graph: &Graph<Coord, usize, Directed>, start: NodeIndex, goal: NodeIndex, axis: Axis) -> usize {
-    let mut priority_queue: BinaryHeap<Reverse<WeightedNode>>  = BinaryHeap::new();
+    let mut priority_queue: BinaryHeap<Reverse<WeightedNode>> = BinaryHeap::new();
+
     for node in graph.node_indices() {
         priority_queue.push(Reverse(WeightedNode {
             node_id: node,
@@ -183,6 +184,6 @@ fn min_heat_loss(file: &str) -> usize {
 }
 
 fn main() {
-    //assert_eq!(min_heat_loss("example.txt"), 102);
-    assert_eq!(min_heat_loss("input.txt"), 0);
+    assert_eq!(min_heat_loss("example.txt"), 102);
+    //assert_eq!(min_heat_loss("input.txt"), 0);
 }
