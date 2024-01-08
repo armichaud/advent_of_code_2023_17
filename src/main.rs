@@ -1,5 +1,5 @@
 use std::cmp::{Reverse, min};
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use nalgebra::DMatrix;
@@ -43,7 +43,7 @@ fn build_matrix(filename: &str) -> DMatrix<usize> {
     DMatrix::from_row_slice(nrows, data.len() / nrows, &data)
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 struct WeightedNode {
     node_id: NodeIndex,
     weight: usize,
@@ -85,16 +85,22 @@ fn dijkstra(graph: &Graph<Coord, usize, Directed>, start: NodeIndex, goal: NodeI
             axis,
         }));
     }
+    let mut visited = HashSet::<NodeIndex>::new();
     update_weight(&mut priority_queue, start, 0, axis.clone());
     while let Some(Reverse(node)) = priority_queue.pop() {
         let axis = node.axis;
         let node_index: NodeIndex = NodeIndex::new(node.node_id.index() as usize);
+        visited.insert(node_index);
         let coord: Coord = graph[node_index];
+        //println!("Visiting node {:?} with weight {}.", coord, node.weight);
         if node.node_id.index() == goal.index() {
             return node.weight;
         }
         for neighbor in graph.neighbors(NodeIndex::new(node.node_id.index() as usize)) {
             let (x, y) = graph[neighbor];
+            if visited.contains(&neighbor) {
+                continue;
+            }
             // We only want to consider neighbors on the axis perpendicular to the previous step.
             // This is the entire reason we need to have a custom dijkstra implementation.
             if axis == Axis::X && x != coord.0 {
@@ -104,10 +110,9 @@ fn dijkstra(graph: &Graph<Coord, usize, Directed>, start: NodeIndex, goal: NodeI
                 continue;
             };
             let edge_weight = graph.edges_connecting(NodeIndex::new(node.node_id.index() as usize), neighbor).next().unwrap().weight();
-            let potential_weight = priority_queue.iter().find(|&Reverse(x)| x.node_id == neighbor).unwrap().0.weight + edge_weight;
-            if potential_weight < node.weight {
-                update_weight(&mut priority_queue, neighbor, potential_weight, axis.opposite());
-            }
+            let Reverse(neighbor_node) = priority_queue.iter().find(|&Reverse(x)| x.node_id == neighbor).unwrap();
+            let potential_weight = neighbor_node.weight.min(node.weight + edge_weight);
+            update_weight(&mut priority_queue, neighbor, potential_weight, axis.opposite());
         }
     }
     usize::max_value()
@@ -136,7 +141,7 @@ fn min_heat_loss(file: &str) -> usize {
                 }
             }
             // Down
-            let mut weight = 0;
+            weight = 0;
             for i in row + 1..row + 4 {
                 if i < matrix.nrows() {
                     let destination = (i, col);
@@ -145,7 +150,7 @@ fn min_heat_loss(file: &str) -> usize {
                 }
             }
             // Left
-            let mut weight = 0;
+            weight = 0;
             for i in ((col as i32 - 3)..col as i32).rev() {
                 if i > -1 {
                     let destination = (row, i as usize);
@@ -154,7 +159,7 @@ fn min_heat_loss(file: &str) -> usize {
                 }
             }
             // Right
-            let mut weight = 0;
+            weight = 0;
             for i in col + 1..col + 4 {
                 if i < matrix.ncols() {
                     let destination = (row, i);
@@ -164,7 +169,6 @@ fn min_heat_loss(file: &str) -> usize {
             }
             for neighbor in neighbors {
                 let target = graph.node_indices().find(|i| graph[*i] == neighbor.0).unwrap();
-                println!("{:?} -> {:?} = {}", location, neighbor.0, neighbor.1);
                 graph.add_edge(source, target, neighbor.1);
             }
         }
@@ -173,10 +177,12 @@ fn min_heat_loss(file: &str) -> usize {
     let goal = graph.node_indices().find(|i| graph[*i] == (matrix.nrows() - 1, matrix.ncols() - 1)).unwrap();
     let shortest_path_starting_horizontal = dijkstra(&graph, start, goal, Axis::X);
     let shortest_path_starting_vertical = dijkstra(&graph, start, goal, Axis::Y);
+    println!("Shortest path starting horizontally: {}", shortest_path_starting_horizontal);
+    println!("Shortest path starting vertically: {}", shortest_path_starting_vertical);
     min(shortest_path_starting_horizontal, shortest_path_starting_vertical)
 }
 
 fn main() {
-    assert_eq!(min_heat_loss("example.txt"), 102);
-    // assert_eq!(dijkstra("input.txt"), 0);
+    //assert_eq!(min_heat_loss("example.txt"), 102);
+    assert_eq!(min_heat_loss("input.txt"), 0);
 }
